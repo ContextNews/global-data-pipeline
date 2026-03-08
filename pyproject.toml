@@ -1,0 +1,59 @@
+[tool.poetry]
+name = "global-data-pipeline"
+version = "0.1.0"
+description = "Extract global macroeconomic timeseries from WB, IMF, and UN — publish to Hugging Face"
+authors = []
+license = "MIT"
+readme = "DESIGN.md"
+packages = [{include = "global_data_pipeline", from = "src"}]
+
+[tool.poetry.scripts]
+gdp = "global_data_pipeline.cli:app"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+# Core
+pandas = "^2.0"
+pyarrow = "*"
+pydantic-settings = "*"
+typer = {extras = ["all"], version = "*"}
+httpx = "*"
+
+# Data sources
+wbgapi = "*"
+imfp = "*"
+
+# Publishing
+datasets = "*"
+huggingface_hub = "*"
+
+[tool.poetry.group.phase2.dependencies]
+comtradeapicall = "*"
+sdmx1 = "*"
+
+[tool.poetry.group.phase3.dependencies]
+sqlalchemy = "*"
+alembic = "*"
+psycopg2-binary = "*"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "*"
+pytest-cov = "*"
+ruff = "*"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
