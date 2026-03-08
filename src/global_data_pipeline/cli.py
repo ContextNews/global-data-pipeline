@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import typer
 
 from global_data_pipeline.config import settings
@@ -49,13 +51,14 @@ def discover(
 def extract(
     source: str = typer.Argument(..., help=_SOURCE_HELP),
     full: bool = typer.Option(False, "--full", help="Force full rebuild, ignoring saved state."),
+    workers: int = typer.Option(0, "--workers", "-w", help="Parallel workers (0 = per-source default)."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Extract, transform, and save data locally."""
     setup_logging(verbose)
     settings.ensure_dirs()
     for name in _resolve_sources(source):
-        _run_extract(name, full=full)
+        _run_extract(name, full=full, workers=workers or None)
 
 
 @app.command()
@@ -110,6 +113,7 @@ def run(
     source: str = typer.Option("all", "--source", help=_SOURCE_HELP),
     no_publish: bool = typer.Option(False, "--no-publish", help="Skip Hugging Face publishing."),
     full: bool = typer.Option(False, "--full", help="Force full rebuild."),
+    workers: int = typer.Option(0, "--workers", "-w", help="Parallel workers (0 = per-source default)."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Run the full pipeline: extract then publish."""
@@ -117,7 +121,7 @@ def run(
     settings.ensure_dirs()
     names = _resolve_sources(source)
     for name in names:
-        _run_extract(name, full=full)
+        _run_extract(name, full=full, workers=workers or None)
     if not no_publish:
         if not settings.hf_token:
             typer.echo("HF_TOKEN not set — skipping publish.", err=True)
@@ -132,36 +136,54 @@ def run(
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+# Default parallel workers per source.
+# IMF: kept at 1 — imfp manages its own rate limiting (10 req/5 s).
+_DEFAULT_WORKERS: dict[str, int] = {"world_bank": 8, "imf": 1, "un_sdg": 4}
 
-def _run_extract(source_name: str, *, full: bool) -> None:
+
+def _run_extract(source_name: str, *, full: bool, workers: int | None = None) -> None:
     src = ALL_SOURCES[source_name]()
     state = PipelineState(settings.state_dir, source_name)
+    n_workers = workers if workers is not None else _DEFAULT_WORKERS.get(source_name, 4)
 
     typer.echo(f"[{source_name}] Discovering indicators...")
     indicators = src.discover()
     typer.echo(f"[{source_name}] {len(indicators)} indicators found")
 
-    skipped = extracted = failed = 0
+    # Skip anything already in state — supports resuming interrupted runs.
+    # Use --full to re-extract everything.
+    to_extract = [ind for ind in indicators if full or state.get_indicator(ind.code) is None]
+    skipped = len(indicators) - len(to_extract)
+    if skipped:
+        typer.echo(f"[{source_name}] Resuming — skipping {skipped} already-extracted indicators")
 
-    for indicator in indicators:
-        prev = state.get_indicator(indicator.code)
-        if not full and prev is not None:
-            if state.should_skip(indicator.code, prev.get("last_updated")):
-                skipped += 1
-                continue
+    total = len(to_extract)
+    extracted = failed = 0
 
+    def _fetch(indicator):
         df = src.extract_and_transform(indicator)
         if df.empty:
-            log.debug("No data for %s — skipping write", indicator.code)
-            failed += 1
-            continue
-
+            return indicator.code, None
         path = local_store.write_indicator(settings.datasets_dir, source_name, indicator.code, df)
-        checksum = PipelineState.compute_checksum(path.read_bytes())
-        state.update_indicator(indicator.code, row_count=len(df), checksum=checksum)
-        state.save()
-        extracted += 1
+        return indicator.code, len(df)
 
+    with ThreadPoolExecutor(max_workers=n_workers) as executor:
+        futures = {executor.submit(_fetch, ind): ind for ind in to_extract}
+        for completed, future in enumerate(as_completed(futures), 1):
+            code, row_count = future.result()
+            if row_count is None:
+                log.warning("[%d/%d] %s — no data", completed, total, code)
+                failed += 1
+            else:
+                log.info("[%d/%d] %s — %d rows", completed, total, code, row_count)
+                state.update_indicator(code, row_count=row_count)
+                extracted += 1
+
+            # Flush state to disk every 10 completions to bound checkpoint cost
+            if completed % 10 == 0:
+                state.save()
+
+    state.save()
     typer.echo(
         f"[{source_name}] Done — extracted: {extracted}, skipped: {skipped}, failed: {failed}"
     )

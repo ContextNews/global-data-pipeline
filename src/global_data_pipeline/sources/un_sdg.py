@@ -20,11 +20,9 @@ _PAGE_SIZE = 1000
 class UNSDGSource(Source):
     name = "un_sdg"
 
-    def __init__(self) -> None:
-        self._client = httpx.Client(timeout=60.0)
-
     def discover(self) -> list[IndicatorInfo]:
-        resp = self._client.get(f"{_BASE_URL}/Series/List")
+        with httpx.Client(timeout=60.0) as client:
+            resp = client.get(f"{_BASE_URL}/Series/List")
         resp.raise_for_status()
         series_list = resp.json()
 
@@ -45,21 +43,22 @@ class UNSDGSource(Source):
     def extract_indicator(self, indicator: IndicatorInfo) -> pd.DataFrame:
         rows: list[dict] = []
         page = 1
-        while True:
-            try:
-                resp = self._client.get(
-                    f"{_BASE_URL}/Series/Data",
-                    params={"seriesCode": indicator.code, "page": page, "pageSize": _PAGE_SIZE},
-                )
-                resp.raise_for_status()
-                body = resp.json()
-                rows.extend(body.get("data", []))
-                if page >= body.get("pageCount", 1):
+        with httpx.Client(timeout=60.0) as client:
+            while True:
+                try:
+                    resp = client.get(
+                        f"{_BASE_URL}/Series/Data",
+                        params={"seriesCode": indicator.code, "page": page, "pageSize": _PAGE_SIZE},
+                    )
+                    resp.raise_for_status()
+                    body = resp.json()
+                    rows.extend(body.get("data", []))
+                    if page >= body.get("pageCount", 1):
+                        break
+                    page += 1
+                except Exception as e:
+                    log.warning("Failed page %d for %s: %s", page, indicator.code, e)
                     break
-                page += 1
-            except Exception as e:
-                log.warning("Failed page %d for %s: %s", page, indicator.code, e)
-                break
 
         if not rows:
             return pd.DataFrame()
