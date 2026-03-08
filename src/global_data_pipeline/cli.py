@@ -164,7 +164,7 @@ def _run_extract(source_name: str, *, full: bool, workers: int | None = None) ->
         df = src.extract_and_transform(indicator)
         if df.empty:
             return indicator.code, None
-        path = local_store.write_indicator(settings.datasets_dir, source_name, indicator.code, df)
+        local_store.write_indicator(settings.datasets_dir, source_name, indicator.code, df)
         return indicator.code, len(df)
 
     with ThreadPoolExecutor(max_workers=n_workers) as executor:
