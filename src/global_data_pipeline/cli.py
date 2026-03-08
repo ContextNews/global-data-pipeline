@@ -147,7 +147,11 @@ def _run_extract(source_name: str, *, full: bool, workers: int | None = None) ->
     n_workers = workers if workers is not None else _DEFAULT_WORKERS.get(source_name, 4)
 
     typer.echo(f"[{source_name}] Discovering indicators...")
-    indicators = src.discover()
+    try:
+        indicators = src.discover()
+    except Exception as e:
+        typer.echo(f"[{source_name}] Discovery failed — skipping source: {e}", err=True)
+        return
     typer.echo(f"[{source_name}] {len(indicators)} indicators found")
 
     # Skip anything already in state — supports resuming interrupted runs.
