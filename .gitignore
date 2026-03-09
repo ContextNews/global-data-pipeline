@@ -32,3 +32,7 @@ poetry.lock
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Local-only docs
+CLAUDE.md
+plans/
