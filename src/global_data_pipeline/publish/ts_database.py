@@ -47,6 +47,7 @@ def load_source_from_hf(
     repo_id = hf_repo or _REPO_IDS.get(source_name)
     if repo_id is None:
         raise ValueError(f"No HF repo configured for source '{source_name}'")
+    hf_token = hf_token or None  # treat empty string as no token
 
     engine = create_engine(database_url)
 
