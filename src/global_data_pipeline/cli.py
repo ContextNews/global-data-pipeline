@@ -6,11 +6,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import typer
 
+import global_data_pipeline.storage.local as local_store
 from global_data_pipeline.config import settings
 from global_data_pipeline.logging import get_logger, setup_logging
 from global_data_pipeline.sources import ALL_SOURCES
 from global_data_pipeline.storage.state import PipelineState
-import global_data_pipeline.storage.local as local_store
 
 log = get_logger("cli")
 
@@ -51,7 +51,7 @@ def discover(
 def extract(
     source: str = typer.Argument(..., help=_SOURCE_HELP),
     full: bool = typer.Option(False, "--full", help="Force full rebuild, ignoring saved state."),
-    workers: int = typer.Option(0, "--workers", "-w", help="Parallel workers (0 = per-source default)."),
+    workers: int = typer.Option(0, "--workers", "-w", help="Parallel workers (0 = default)."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Extract, transform, and save data locally."""
@@ -108,12 +108,38 @@ def load(
         load_source(name, settings.datasets_dir, settings.database_url)
 
 
+@app.command("load-ts")
+def load_ts(
+    source: str = typer.Argument(..., help=_SOURCE_HELP),
+    full: bool = typer.Option(False, "--full", help="Force full reload, ignoring checkpoint."),
+    hf_repo: str = typer.Option("", "--hf-repo", help="Override HuggingFace repo id."),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Load time series data from HuggingFace into Neon PostgreSQL normalised tables."""
+    setup_logging(verbose)
+    settings.ensure_dirs()
+    if not settings.database_url:
+        typer.echo("DATABASE_URL not set in .env — cannot load.", err=True)
+        raise typer.Exit(1)
+    from global_data_pipeline.publish.ts_database import load_source_from_hf
+
+    for name in _resolve_sources(source):
+        load_source_from_hf(
+            source_name=name,
+            database_url=settings.database_url,
+            state_dir=settings.state_dir,
+            full=full,
+            hf_token=settings.hf_token,
+            hf_repo=hf_repo or None,
+        )
+
+
 @app.command()
 def run(
     source: str = typer.Option("all", "--source", help=_SOURCE_HELP),
     no_publish: bool = typer.Option(False, "--no-publish", help="Skip Hugging Face publishing."),
     full: bool = typer.Option(False, "--full", help="Force full rebuild."),
-    workers: int = typer.Option(0, "--workers", "-w", help="Parallel workers (0 = per-source default)."),
+    workers: int = typer.Option(0, "--workers", "-w", help="Parallel workers (0 = default)."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Run the full pipeline: extract then publish."""

@@ -27,9 +27,10 @@ poetry run ruff format src/ tests/
 
 # CLI (after install)
 gdp discover world_bank
-gdp extract world_bank [--full]
+gdp extract world_bank [--full] [--workers N]
 gdp status
 gdp publish world_bank
+gdp load world_bank          # Phase 3: load into Neon PostgreSQL
 gdp run [--source world_bank] [--no-publish]
 ```
 
@@ -53,6 +54,8 @@ All data sources implement the `Source` ABC with three methods:
 
 `extract_and_transform()` is a convenience method that chains the two. Each source lives in `sources/{source_name}.py`.
 
+To add a new source: implement `Source`, then register it in `sources/__init__.py`'s `ALL_SOURCES` dict and add a default worker count to `_DEFAULT_WORKERS` in `cli.py`.
+
 ### Standardised schema (`transform.py`)
 
 Every source's `transform()` must produce a DataFrame with exactly these columns (enforced by `enforce_schema()`):
@@ -73,7 +76,7 @@ Key functions: `write_indicator()`, `read_indicator()`, `read_source()` (loads a
 
 ### Incremental state (`storage/state.py`)
 
-`PipelineState` persists extraction state to `data/state/{source_name}.json`, tracking per-indicator `last_updated`, `row_count`, and `checksum`. Use `should_skip(code, current_last_updated)` to avoid re-fetching unchanged indicators. Call `save()` after each indicator completes so runs are resumable on crash.
+`PipelineState` persists extraction state to `data/state/{source_name}.json`, tracking per-indicator `last_updated`, `row_count`, and `checksum`. The CLI uses `get_indicator(code) is None` to skip already-extracted indicators on resume; `should_skip(code, current_last_updated)` is for skipping based on upstream change detection. Call `save()` after each indicator completes so runs are resumable on crash (the CLI flushes every 10 completions).
 
 ### Configuration (`config.py`)
 
@@ -94,6 +97,10 @@ All of `data/` is gitignored.
 
 One Hugging Face dataset repo per source. For large sources (IMF, WB), use `huggingface_hub.upload_folder()` directly rather than `push_to_hub()` to avoid loading everything into memory.
 
+### Logging (`logging.py`)
+
+Use `get_logger(name)` to obtain a logger. Call `setup_logging(verbose=False)` at the start of each CLI command to initialise the root logger.
+
 ### IMF rate limiting
 
-The IMF API enforces 10 requests per 5 seconds. A full IMF extraction takes hours. Always design IMF extraction to be resumable via `PipelineState` checkpointing.
+The IMF API enforces 10 requests per 5 seconds. A full IMF extraction takes hours. Always design IMF extraction to be resumable via `PipelineState` checkpointing. The default worker count for IMF is 1 (`imfp` manages its own rate limiting); World Bank defaults to 8, UN SDG to 4.

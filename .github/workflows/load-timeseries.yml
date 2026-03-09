@@ -1,0 +1,56 @@
+name: Load Timeseries → Neon
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "Source to load (world_bank | imf | un_sdg | all)"
+        required: true
+        default: world_bank
+        type: choice
+        options:
+          - world_bank
+          - imf
+          - un_sdg
+          - all
+      full:
+        description: "Force full reload (ignore checkpoint state)"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  load:
+    name: Load ${{ inputs.source }} → Neon
+    runs-on: ubuntu-latest
+    timeout-minutes: 360   # WB full load can take several hours
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Cache Poetry virtualenv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry
+          key: poetry-phase3-${{ hashFiles('poetry.lock') }}
+
+      - name: Install dependencies
+        run: poetry install --with phase3
+
+      - name: Load timeseries into Neon
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          FULL_FLAG=""
+          if [ "${{ inputs.full }}" = "true" ]; then
+            FULL_FLAG="--full"
+          fi
+          poetry run gdp load-ts ${{ inputs.source }} $FULL_FLAG --verbose
