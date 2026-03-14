@@ -42,8 +42,14 @@ def load_source_from_hf(
     full: bool = False,
     hf_token: str | None = None,
     hf_repo: str | None = None,
+    indicators: set[str] | None = None,
 ) -> None:
-    """Stream each indicator Parquet file from HF and upsert into Neon."""
+    """Stream each indicator Parquet file from HF and upsert into Neon.
+
+    Args:
+        indicators: If given, only load files whose indicator code (filename stem)
+                    is in this set. Pass None to load everything.
+    """
     repo_id = hf_repo or _REPO_IDS.get(source_name)
     if repo_id is None:
         raise ValueError(f"No HF repo configured for source '{source_name}'")
@@ -66,6 +72,7 @@ def load_source_from_hf(
         f
         for f in api.list_repo_files(repo_id, repo_type="dataset")
         if f.endswith(".parquet")
+        and (indicators is None or Path(f).stem in indicators)
     ]
     log.info("Found %d Parquet files in %s", len(all_files), repo_id)
 

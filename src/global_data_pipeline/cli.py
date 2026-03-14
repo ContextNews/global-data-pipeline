@@ -113,6 +113,9 @@ def load_ts(
     source: str = typer.Argument(..., help=_SOURCE_HELP),
     full: bool = typer.Option(False, "--full", help="Force full reload, ignoring checkpoint."),
     hf_repo: str = typer.Option("", "--hf-repo", help="Override HuggingFace repo id."),
+    indicator: list[str] = typer.Option(
+        [], "--indicator", "-i", help="Indicator code to load (repeat for multiple; default: all)."
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Load time series data from HuggingFace into Neon PostgreSQL normalised tables."""
@@ -123,6 +126,7 @@ def load_ts(
         raise typer.Exit(1)
     from global_data_pipeline.publish.ts_database import load_source_from_hf
 
+    indicators = set(indicator) if indicator else None
     for name in _resolve_sources(source):
         load_source_from_hf(
             source_name=name,
@@ -131,6 +135,7 @@ def load_ts(
             full=full,
             hf_token=settings.hf_token,
             hf_repo=hf_repo or None,
+            indicators=indicators,
         )
 
 

@@ -18,6 +18,11 @@ on:
         required: false
         default: false
         type: boolean
+      indicators:
+        description: "Comma-separated indicator codes to load (leave empty to load all)"
+        required: false
+        default: ""
+        type: string
 
 jobs:
   load:
@@ -49,8 +54,15 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          FULL_FLAG=""
+          ARGS=""
           if [ "${{ inputs.full }}" = "true" ]; then
-            FULL_FLAG="--full"
+            ARGS="$ARGS --full"
           fi
-          poetry run gdp load-ts ${{ inputs.source }} $FULL_FLAG --verbose
+          if [ -n "${{ inputs.indicators }}" ]; then
+            IFS=',' read -ra CODES <<< "${{ inputs.indicators }}"
+            for code in "${CODES[@]}"; do
+              code="${code// /}"   # strip any spaces around commas
+              ARGS="$ARGS --indicator $code"
+            done
+          fi
+          poetry run gdp load-ts ${{ inputs.source }} $ARGS --verbose
